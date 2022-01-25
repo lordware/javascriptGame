@@ -8,6 +8,7 @@ var gameObjects = [];
 var texts = [];
 var player;
 var enemySpawner;
+var mousePressed = false;
 
 function init() {
     canvas =  document.getElementById("gameCanvas");
@@ -19,7 +20,7 @@ function init() {
     window.addEventListener("keyup", keyUpHandler);
 
     let playerX = canvas.width / 2 - 50, playerY = canvas.height / 2 - 50;
-    let hpBar = new HpBar(100);
+    let hpBar = new HpBar();
     player = new Player(playerX, playerY, hpBar);
 
     gameObjects.push(player);
@@ -40,9 +41,27 @@ function keyUpHandler(event) {
     keys.splice(keyIndex, 1);
 }
 
+document.onmousedown = function(e) {
+    mousePressed = true;
+};
+
+document.onmouseup = function(e) {
+    mousePressed = false;
+};
+
 let secondsPassed;
 let oldTimeStamp;
 let fps;
+let mouse_pos_x;
+let mouse_pos_y;
+
+function mouse_position(e)
+{
+    mouse_pos_x = e.screenX;
+    mouse_pos_y = e.screenY;
+}
+
+
 function gameloop(timeStamp) {
     update();
     draw();
@@ -231,6 +250,10 @@ class HpBar extends GameObject {
         ctx.fillStyle = "#62d0f3";
         // exp:
         ctx.fillRect(this.x, this.y + 20, player.width * (this.exp / player.nextLvlExp), 8);
+        // hp text:
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = 'Bold 14px Arial';
+        ctx.fillText("Hp: " + this.hp + "/" + this.maxHp, this.x, this.y + this.height / 2);
     }
 }
 
@@ -278,6 +301,29 @@ class Health extends GameObject {
 
 }
 
+class Rapidfire extends GameObject {
+    constructor(x, y) {
+        super(x, y);
+        this.width = this.height = 40;
+        this.hitbox = new Hitbox(this.x, this.y, this.width, this.height);
+        this.fireRateIncrease = 100;
+    }
+
+    update() {
+        if (this.hitbox.intersects(player.hitbox)) {
+            if(player.bulletCooldown >= player.minimumBulletCooldown + this.fireRateIncrease)
+                player.bulletCooldown -= this.fireRateIncrease;
+            gameObjects.splice(gameObjects.indexOf(this), 1);
+        }
+    }
+
+    draw() {   
+        ctx.fillStyle = "#fc0ae4";
+        ctx.fillRect(this.x, this.y, this.width, this.height);
+    }
+
+}
+
 class Enemy extends GameObject {
     constructor(x, y, width, height) {
         super(x, y);
@@ -295,16 +341,22 @@ class Enemy extends GameObject {
             if (gameObject instanceof Bullet) {
                 if (gameObject.hitbox.intersects(this.hitbox)) {
                     gameObjects.splice(gameObjects.indexOf(gameObject), 1);
-                    this.hp -= player.damage * 10;
+                    this.hp -= player.damage;
                 }
             }
         });
 	}
 
     spawnHealthRandom() {
-        let randInt = getRandomInt(0, 21);
-        if (randInt == 10)
+        let randInt = getRandomInt(0, 11);
+        if (randInt == 5)
             gameObjects.push(new Health(this.x, this.y));
+    }
+
+    spawnRapidFireRandom() {
+        let randInt = getRandomInt(0, 11);
+        if (randInt == 5)
+            gameObjects.push(new Rapidfire(this.x, this.y));
     }
 	
 	updateHitbox() {
@@ -340,6 +392,7 @@ class Enemy extends GameObject {
     die() {
         this.dropExp();
         this.spawnHealthRandom();
+        this.spawnRapidFireRandom();
         this.explode();
         gameObjects.splice(gameObjects.indexOf(this), 1);
     }
@@ -369,12 +422,19 @@ class BasicEnemy extends Enemy {
     }
 
     move() {
-		if (player.x >= this.x)
-            this.x += this.velX;
+		if (player.x >= this.x) {
+            if (this.x + this.velX > player.x)
+                this.x = player.x;
+            else
+                this.x += this.velX;
+        }
         else
             this.x -= this.velX;
         if (player.y >= this.y)
-            this.y += this.velY;
+            if (this.y + this.velY > player.y)
+                this.y = player.y;
+            else
+                this.y += this.velY;
         else
             this.y -= this.velY;
 	}
@@ -479,9 +539,20 @@ class Bullet extends GameObject {
         this.hitbox.y = this.y;
     }
 
+    drawTrail() {
+        ctx.globalAlpha = 0.25;
+        ctx.fillStyle = "yellow";
+        for (let i = 1; i <= 15; i++){
+            ctx.fillRect(this.x - this.velX * i, this.y - this.velY * i, this.width, this.height);
+            ctx.globalAlpha -= 0.05;
+        }
+        ctx.globalAlpha = 1;
+    }
+
     draw() {
         super.draw();
-        ctx.fillStyle = "yellow"
+        this.drawTrail();
+        ctx.fillStyle = "yellow";
         ctx.fillRect(this.x, this.y, this.width, this.height);
     }
 }
@@ -593,13 +664,14 @@ class Player extends GameObject{
         super(x, y);
         this.velX = this.velY = 4;
 		this.bulletVel = 10;
-		this.bulletCooldown = 750;
+        this.bulletCooldown = 750;
+        this. basicCooldown = 750;
         this.hpBar = hpBar;
-        this.hpBar.hpColor = "#00FF00";
+        this.hpBar.hpColor = "#078709";
         this.maxHp = 100;
         this.hpBar.width = 100;
         this.hp = 100;
-        this.damage = 1;
+        this.damage = 5;
         this.lvl = 1;
         this.exp = 0;
         this.nextLvlExp = 10;
@@ -607,9 +679,14 @@ class Player extends GameObject{
         this.height = 100;
         this.hitbox = new Hitbox(this.x, this.y, this.width, this.height);
         this.lastShot = 0;
+        this.reloadTime = 0;
     }
 	
 	shoot() {
+        this.reloadTime = Date.now() - this.lastShot;
+        if (this.reloadTime > this.bulletCooldown) {
+            this.reloadTime = this.bulletCooldown;
+        }
 		if (Date.now() - this.lastShot >= this.bulletCooldown) {
 			let bulletX = this.x + this.width / 2 - Bullet.size / 2;
 			let bulletY = this.y + this.height / 2 - Bullet.size / 2;
@@ -617,17 +694,11 @@ class Player extends GameObject{
             let bulletVelX = 0;
             let bulletVelY = 0;
 
-            if (keys.includes("ArrowUp")) {
-                bulletVelY = -this.bulletVel;
-            }
-            if (keys.includes("ArrowDown")) {
-                bulletVelY = this.bulletVel;
-            }
-            if (keys.includes("ArrowLeft")) {
-                bulletVelX = -this.bulletVel;
-            }
-            if (keys.includes("ArrowRight")) {
-                bulletVelX = this.bulletVel;
+            if (mousePressed) {
+                var rotation = Math.atan2(player.y + player.height / 2 - mouse_pos_y, player.x + player.width / 2 - mouse_pos_x);
+
+                bulletVelX -= Math.cos(rotation) * this.bulletVel;
+                bulletVelY -= Math.sin(rotation) * this.bulletVel;
             }
 
             if (bulletVelX != 0 || bulletVelY != 0) {
@@ -637,6 +708,7 @@ class Player extends GameObject{
         }
 	}
 
+    
     levelUp() {
         this.lvl += 1;
         this.exp = this.exp - this.nextLvlExp;
@@ -644,7 +716,8 @@ class Player extends GameObject{
         this.damage += 1;
         this.maxHp += 5;
         this.hp += 5;
-        if (this.bulletCooldown >= 300);
+        this.minimumBulletCooldown = 200;
+        if (this.bulletCooldown >= this.minimumBulletCooldown + 10);
             this.bulletCooldown -= 10;
         if (this.lvl % 10 == 0)
             this.velX = this.velY = this.velX + 1;
@@ -667,6 +740,7 @@ class Player extends GameObject{
                 if (gameObject.hitbox.intersects(this.hitbox)) {
                     if(this.hp > 0)
                         this.hp -= 1;
+                        this.bulletCooldown = this.basicCooldown - this.lvl * 10;
                 }
             }
         });
@@ -728,6 +802,10 @@ class Player extends GameObject{
         ctx.font = '14px Arial';
         ctx.fillText("Dmg: " + this.damage, this.x + 10, this.y + 55);
         ctx.fillText("Spd: " + this.velX, this.x + 10, this.y + 70);
-        ctx.fillText("Hp: " + this.hp + "/" + this.maxHp, this.x + 10, this.y + 85);
+        ctx.fillText("CD: " + this.reloadTime, this.x + 10, this.y + 95);
+        // reload
+        var reloadt = (player.reloadTime / player.bulletCooldown) * player.width;
+        if (!(reloadt == player.width))
+        ctx.fillRect(this.x, this.y + 105, reloadt, 8);
     }
 }
